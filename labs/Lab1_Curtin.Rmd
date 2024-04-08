@@ -1,0 +1,72 @@
+---
+title: "Lab 1: NYT API"
+author: "Charlie Curtin"
+date: "2024-04-03"
+output: html_document
+---
+
+```{r, warning = FALSE, include = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite) #convert results from API queries into R-friendly formats 
+library(tidyverse) #tidy
+library(tidytext) #text data management and analysis
+library(ggplot2) #plot word frequencies and publication dates
+
+#assign API key.  When you create a NYT Dev account, you will be given a key
+API_KEY <- "HmVuLnryyQa8jrBZ1GwjVQz0Mb01vlyD"
+```
+
+## Lab 1: NYT API
+
+1.  Create a free New York Times account (<https://developer.nytimes.com/get-started>)
+
+2.  Pick an interesting environmental key word(s) and use the {jsonlite} package to query the API. Pick something high profile enough and over a large enough time frame that your query yields enough articles for an interesting examination.
+
+3.  Recreate the publications per day and word frequency plots using the first paragraph field.  This time filter on the response.docs.news_desk variable to winnow out irrelevant results.
+
+-   Make some (at least 3) transformations to the corpus including: add context-specific stopword(s), stem a key term and its variants, remove numbers)
+
+4.  Recreate the publications per day and word frequency plots using the headlines variable (response.docs.headline.main). Compare the distributions of word frequencies between the first paragraph and headlines. Do you see any difference?
+
+#### Constructing our search term
+
+Environmental keyword: "snowpack"
+
+```{r}
+term <- "snowpack"
+begin_date <- "20200101"
+end_date <- "20230401"
+
+#construct the query url using API operators
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=",
+                  term, "%20",
+                  "&begin_date=", begin_date,
+                  "&end_date=", end_date,
+                  "&facet_filter=true",
+                  "&api-key=", API_KEY)
+```
+
+```{r}
+#run initial query
+initialQuery <- fromJSON(baseurl)
+
+#maxPages <- round((initialQuery$response$meta$hits[1] / 10)-1) 
+maxPages <- 10
+
+#initiate a list to hold results of our for loop
+pages <- list()
+
+#loop
+for(i in 0:maxPages){
+  nytSearch <- fromJSON(paste0(baseurl, "&page=",i), flatten = TRUE) %>% data.frame()
+  message("Retrieving page ", i)
+  pages[[i+1]] <- nytSearch 
+  Sys.sleep(12)
+}
+```
+
+```{r}
+# bind the pages and create a tibble from what the API retrieved
+nyt_df <- bind_rows(pages)
+```
+
