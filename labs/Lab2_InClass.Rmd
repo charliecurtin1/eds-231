@@ -1,0 +1,89 @@
+---
+title: "Week2_demo"
+author: "Mateo Robbins"
+date: "2024-04-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(tidytext)
+library(tidyverse)
+```
+
+Download data zip file from here: https://github.com/MaRo406/EDS-231-text-sentiment/blob/main/data/SB_stories.zip
+Unzip into a convenient location, ex. /data/Spring-Break-Stories
+```{r}
+#list.files is base r to list files in dir/folder
+#we use map()  to apply a function to each element of a vector or list
+tbl <- list.files("/Users/charliecurtin 1/documents/MEDS/courses/EDS-231/eds-231/data/SB_stories",
+pattern = "*.txt") %>% 
+  map_chr(~read_file(.)) %>% #{purr}, {readr}
+  tibble(text = .)
+
+tbl <- list.files(here("data/SB_stories"), pattern = "*.txt") %>% map_chr(~ read_file(here("data/SB_stories", .))) %>% #{purr}, {readr}
+  tibble(text = .)
+```
+
+
+```{r unnest_tokens}
+text_words <- tbl %>% 
+  unnest_tokens(word, text)
+```
+
+```{r word_frequency_plot}
+# creating a word frequency plot
+text_words %>% 
+  count(word, sort = TRUE) %>%
+  filter(n > 100) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+  
+```
+
+```{r stop-words}
+#plot again as above but excluding stop word
+data(stop_words)
+
+# pull out the stop words with an anti-join
+text_words <- text_words %>% 
+  anti_join(stop_words)
+
+# plot again, grabbing the top words by frequency
+text_words %>% 
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+
+```
+
+```{r get_bing}
+bing_sent <- get_sentiments("bing")
+```
+
+```{r join_bing}
+# join the bing sentiments to our dataset
+text_words <- text_words %>% 
+  left_join(bing_sent, by = "word")
+```
+
+```{r nrc_lex}
+# grab nrc sentiments
+nrc_sent <- get_sentiments("nrc")
+
+# filter for joyous sentiment
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+# filter our API words for those that are joy words
+text_words %>% 
+  inner_join(nrc_joy, by = "word") %>% 
+  count(word, sort = TRUE)
+```
+

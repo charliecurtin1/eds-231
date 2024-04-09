@@ -29,7 +29,6 @@ We'll send a query to the NY Times API using a URL that contains information abo
 fromJSON() is a wrapper function that handles our request and the API response. We'll use it to create an object,t, with the results of our query. The flatten = T argument converts from the nested JSON format to an R-friendlier form.
 
 ```{r api, eval = FALSE}
-
 # create the query url
 url <- paste("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=haaland&api-key=", API_KEY, sep ="")
 

@@ -7,10 +7,10 @@ output: html_document
 
 ```{r, warning = FALSE, include = FALSE, message = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(jsonlite) #convert results from API queries into R-friendly formats 
-library(tidyverse) #tidy
-library(tidytext) #text data management and analysis
-library(ggplot2) #plot word frequencies and publication dates
+library(jsonlite) # convert results from API queries into R-friendly formats 
+library(tidyverse) # tidy
+library(tidytext) # text data management and analysis
+library(ggplot2) # plot word frequencies and publication dates
 
 #assign API key.  When you create a NYT Dev account, you will be given a key
 API_KEY <- "HmVuLnryyQa8jrBZ1GwjVQz0Mb01vlyD"
@@ -30,7 +30,7 @@ API_KEY <- "HmVuLnryyQa8jrBZ1GwjVQz0Mb01vlyD"
 
 #### Constructing our search term
 
-Environmental keyword: "snowpack"
+I picked "snowpack" for my environmental keyword, and my search period is between January 1st, 2020, and April 1st, 2023.
 
 ```{r}
 term <- "snowpack"
@@ -46,17 +46,18 @@ baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=",
                   "&api-key=", API_KEY)
 ```
 
+
 ```{r}
-#run initial query
+# run initial query
 initialQuery <- fromJSON(baseurl)
 
-#maxPages <- round((initialQuery$response$meta$hits[1] / 10)-1) 
+# set the maximum number of pages to grab for articles
 maxPages <- 10
 
-#initiate a list to hold results of our for loop
+# initiate a list to hold results of our for loop
 pages <- list()
 
-#loop
+# for loop
 for(i in 0:maxPages){
   nytSearch <- fromJSON(paste0(baseurl, "&page=",i), flatten = TRUE) %>% data.frame()
   message("Retrieving page ", i)
@@ -64,9 +65,167 @@ for(i in 0:maxPages){
   Sys.sleep(12)
 }
 ```
+#### Explore the data we retrieved
 
 ```{r}
 # bind the pages and create a tibble from what the API retrieved
 nyt_df <- bind_rows(pages)
+
+# create a bar chart showing what section of the New York Times the piece of media came from
+nyt_df %>% 
+  group_by(response.docs.news_desk) %>%
+  summarize(count=n()) %>% #This creates a new data frame with the count of records for each type_of_material.
+  mutate(percent = (count / sum(count))*100) %>% #add percent of total column
+  ggplot() +
+  geom_bar(aes(y=percent, x=response.docs.news_desk, fill=response.docs.news_desk), stat = "identity") + 
+  theme_bw() +
+  coord_flip()
 ```
+- The media relating to snowpack comes from a number of different news desks. I am going to pick media from what I believe to be the most relevant, which are "National", "Climate", and "Science".
+
+#### Publications per day
+
+```{r}
+# filter for articles from relevant news desk sources
+nyt_df_sub <- nyt_df %>% 
+  filter(response.docs.news_desk %in% c("National", "Climate", "Science"))
+
+# plot the publications per day
+nyt_df_sub %>%
+  mutate(pubDay=gsub("T.*","",response.docs.pub_date)) %>% 
+  group_by(pubDay) %>%
+  summarise(count=n()) %>%
+  filter(count >= 2) %>%
+  ggplot() +
+  geom_bar(aes(x=reorder(pubDay, count), y=count),
+           fill = "orange",
+           stat="identity") +
+  theme_bw() +
+  coord_flip() #bring date so bars go lengthwise
+```
+
+- When we filter for our 3 news desks, we're still left with 72 articles. We can see that on March 10 and January 11, 2023, there were 3 articles published relating to snowpack
+
+#### Word frequency plots
+
+- To analyze word frequency, we first need to retrieve the first paragraph of each article to gather our text data. By unnesting tokens, we can create a new dataframe where each row is associated with a single word. The dataframe is comprised of every word from the lead paragraphs of all 72 of our articles. We want to filter out stop words, or common words that don't add to the meaning or sentiment of our text data.
+
+```{r}
+# load stop words from tidytext
+data(stop_words)
+
+# create new dataframe that includes every token
+tokenized <- nyt_df_sub %>% 
+  unnest_tokens(word, response.docs.lead_paragraph) %>%  # word is the new column, paragraph is the source
+  anti_join(stop_words) # anti_join to only include words that aren't stop words
+  
+# plot the top 10 most frequent keywords
+tokenized %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col(fill = "orange") +
+  theme_bw() +
+  labs(y = NULL)
+```
+- We see that the most frequent word is California, and other frequent words relate to storms, snow, or environmental conditions. We can do some more transformations on our tokens and see how the frequencies changes
+
+```{r}
+tokenized_sub <- tokenized
+
+# remove "'s" to just get certain root words
+tokenized_sub$word <- gsub("’s", '', tokenized_sub$word)
+
+# remove numbers
+tokenized_sub$word <- str_remove_all(tokenized_sub$word, "[:digit:]")
+
+# remove empty rows
+tokenized_sub <- tokenized_sub %>% 
+  filter(word != "")
+
+# plot word frequency again
+tokenized_sub %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col(fill = "orange") +
+  theme_bw() +
+  labs(y = NULL)
+```
+- Our modifications didn't change the word frequency rank, but did increase the counts of certain words, like "California" and "drought".
+
+#### Publications per day with headlines
+
+
+#### Word frequency with headlines
+
+To plot word frequency with headlines, our new tokens are going to be the words from each headline. We'll still use the same transformations as we did with the lead paragraph tokens
+
+```{r}
+# create new dataframe that includes the tokens from headlines
+tokenized_head <- nyt_df_sub %>% 
+  unnest_tokens(word, response.docs.headline.main) %>%  # word is the new column, paragraph is the source
+  anti_join(stop_words)
+
+# create a copy of our headline tokens
+words_head <- tokenized_head
+
+# remove "'s" to just get certain root words
+words_head$word <- gsub("’s", '', words_head$word)
+
+# remove numbers
+words_head$word <- str_remove_all(words_head$word, "[:digit:]")
+
+# remove empty rows
+words_head <- words_head %>% 
+  filter(word != "")
+
+# plot frequency with tokens from headlines
+words_head %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col(fill = "orange") +
+  theme_bw() +
+  labs(y = NULL)
+```
+
+- Our two most frequent words are still California and drought, and our top 10 words from headlines and lead paragraphs share many similar words. Since we have a different total number of tokens from headlines and lead paragraphs, we need to find the percentage occurrence of the words to directly compare the text from each group
+
+#### Comparing headline text and lead paragraph text
+
+```{r}
+# create new dataframes of percentages of each word
+headlines <- words_head %>%
+  count(word, sort = TRUE) %>% # get counts of each word
+  slice_head(n = 10) %>% # grab the top 10 most frequent words
+  mutate(ratio = n / nrow(words_head)) %>% # find the percentage that the word occurred from the total amount of all tokens
+  mutate(group = "headlines") # assign a new column with the group
+
+paragraphs <- tokenized_sub %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10) %>% 
+  mutate(ratio = n / nrow(tokenized_sub)) %>% 
+  mutate(group = "paragraphs")
+
+# bind the two dataframes together
+tokens_compare <- rbind(headlines, paragraphs)
+
+# plot a bar chart of word frequency
+ggplot(tokens_compare) +
+  geom_col(aes(x = ratio, y = reorder(word, ratio), fill = group)) +
+  theme_bw() +
+  labs(y = "word", title = "Word frequency plot from headlines and paragraphs")
+```
+
+- 
+
+
+
+
+
+
 

@@ -98,7 +98,6 @@ baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=",
 
 #examine our query url
 baseurl
-
 ```
 
 The initial query returned one page of ten articles, but also gave us count of total number of hits on our query. We can use that to size a for() loop to automate requests.
