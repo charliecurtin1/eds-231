@@ -47,7 +47,7 @@ baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=",
 ```
 
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # run initial query
 initialQuery <- fromJSON(baseurl)
 
@@ -65,6 +65,7 @@ for(i in 0:maxPages){
   Sys.sleep(12)
 }
 ```
+
 #### Explore the data we retrieved
 
 ```{r}
@@ -81,6 +82,7 @@ nyt_df %>%
   theme_bw() +
   coord_flip()
 ```
+
 - The media relating to snowpack comes from a number of different news desks. I am going to pick media from what I believe to be the most relevant, which are "National", "Climate", and "Science".
 
 #### Publications per day
@@ -110,7 +112,7 @@ nyt_df_sub %>%
 
 - To analyze word frequency, we first need to retrieve the first paragraph of each article to gather our text data. By unnesting tokens, we can create a new dataframe where each row is associated with a single word. The dataframe is comprised of every word from the lead paragraphs of all 72 of our articles. We want to filter out stop words, or common words that don't add to the meaning or sentiment of our text data.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # load stop words from tidytext
 data(stop_words)
 
@@ -129,6 +131,7 @@ tokenized %>%
   theme_bw() +
   labs(y = NULL)
 ```
+
 - We see that the most frequent word is California, and other frequent words relate to storms, snow, or environmental conditions. We can do some more transformations on our tokens and see how the frequencies changes
 
 ```{r}
@@ -154,10 +157,8 @@ tokenized_sub %>%
   theme_bw() +
   labs(y = NULL)
 ```
+
 - Our modifications didn't change the word frequency rank, but did increase the counts of certain words, like "California" and "drought".
-
-#### Publications per day with headlines
-
 
 #### Word frequency with headlines
 
@@ -221,7 +222,7 @@ ggplot(tokens_compare) +
   labs(y = "word", title = "Word frequency plot from headlines and paragraphs")
 ```
 
-- 
+- We see that our bodies of text from the headlines and lead paragraphs share four of the most common words: California, drought, water, and climate. When accounting for share, all of our most common words for headlines are proportionally more common in headlines that in paragraphs.
 
 
 

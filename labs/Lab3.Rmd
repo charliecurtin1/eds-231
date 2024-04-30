@@ -1,0 +1,207 @@
+---
+title: "Lab3"
+author: "Charlie Curtin"
+date: "2024-04-17"
+output: html_document
+---
+### Assignment Lab 3:
+
+Due next week: April 23 at 11:59PM
+
+For this assignment you'll use the article data you downloaded from Nexis Uni in Week 2.
+
+```{r, warning = FALSE, message = FALSE}
+library(LexisNexisTools)
+library(tidyverse)
+library(readr)
+library(stringr)
+library(here)
+library(tidytext)
+library(tidyr)
+library(quanteda)
+library(tm)
+library(topicmodels)
+library(ldatuning)
+library(reshape2)
+library(tictoc)
+```
+
+1.  Create a corpus from your articles.
+
+```{r, message = FALSE, warning = FALSE}
+# list files downloaded from Nexis
+post_files <- list.files(pattern = ".docx", path = here("data/Lab2/"),
+                      full.names = TRUE, 
+                      recursive = TRUE, 
+                      ignore.case = TRUE)
+
+# read in files
+dat <- lnt_read(post_files, convert_date = FALSE, remove_cover = FALSE)
+
+# extract relevant outputs from the LNT output
+meta_df <- dat@meta
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
+
+# convert date, headline, and article text into a tibble
+dat2 <- tibble(Date = meta_df$Date,
+               Headline = meta_df$Headline,
+               ID = articles_df$ID,
+               text = articles_df$Article)
+
+# clean articles dataframe
+dat2 <- dat2 %>% 
+  # remove items that aren't articles
+  filter(!is.na(Date)) %>% 
+  # remove duplicate articles
+  filter(!ID %in% c(35, 41, 88, 89))
+
+# create a corpus from our list of articles
+corpus <- corpus(x = dat2, text_field = "text")
+```
+
+2.  Clean the data as appropriate.
+
+```{r}
+# remove punctuation and numbers
+toks <- tokens(corpus, remove_punct = T, remove_numbers = T)
+
+# remove stop words
+data("stop_words")
+
+toks1 <- tokens_select(toks, pattern = stop_words$word, selection = "remove")
+
+## create document-feature matrix
+dfm1 <- dfm(toks1, tolower = T)
+dfm2 <- dfm_trim(dfm1, min_docfreq = 2)
+
+# remove empty rows in sparse matrix
+sel_idx <- slam::row_sums(dfm2) > 0
+dfm <- dfm2[sel_idx,]
+```
+
+3.  Run three models (i.e. with 3 values of k) and select the overall best value for k (the number of topics) - include some justification for your selection: theory, FindTopicsNumber() optimization metrics, interpretability, LDAvis. Select the best single value of k.
+
+```{r, message = FALSE}
+# find ideal number of topics
+tic()
+
+result <- FindTopicsNumber(dfm,
+                           topics = seq(from = 2, 
+                                        to = 20, 
+                                        by = 1),
+                           metrics = c("CaoJuan2009", "Deveaud2014"),
+                           method = "Gibbs",
+                           verbose = T)
+toc()
+
+FindTopicsNumber_plot(result)
+```
+- Based on the two metrics above, we can see peaks and/or valleys at 4, 7, and 11 topics, so we'll proceed with those 3 values of k. A K-value of 7 seems to be strike the best balance between between maximizing the Deveaud2014 metric and minimizing the CaoJuan2009 metric, so we'll choose that as our best value of K.
+
+#### K = 4
+
+```{r, message = FALSE}
+# create a topic model with a k value of 4
+k4 <- 4
+
+topics4 <- LDA(dfm, k4, method="Gibbs", control=list(iter = 1000, verbose = 25))
+
+# save results of the topic model
+topics4_res <- posterior(topics4)
+terms(topics4, 10)
+theta4 <- topics4_res$topics
+beta4 <- topics4_res$terms
+vocab4 <- (colnames(beta4))
+```
+
+#### K = 7
+
+```{r, message = FALSE}
+# create a topic model with a k value of 7
+k7 <- 7
+
+topics7 <- LDA(dfm, k7, method="Gibbs", control=list(iter = 1000, verbose = 25))
+
+# save results of the topic model
+topics7_res <- posterior(topics7)
+terms(topics7, 10)
+theta7 <- topics7_res$topics
+beta7 <- topics7_res$terms
+vocab7 <- (colnames(beta7))
+```
+
+#### K = 11
+
+```{r, message = FALSE}
+# create a topic model with a k value of 11
+k11 <- 11
+
+topics11 <- LDA(dfm, k11, method="Gibbs", control=list(iter = 1000, verbose = 25))
+
+# save results of the topic model
+topics11_res <- posterior(topics11)
+terms(topics11, 10)
+theta11 <- topics11_res$topics
+beta11 <- topics11_res$terms
+vocab11 <- (colnames(beta11))
+```
+
+4.  Plot the top terms in each topic and the distribution of topics across a sample of the documents (constrained by what looks good in the plot).
+
+```{r}
+# find our top terms by topic
+topics <- tidy(topics7, matrix = "beta")
+
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# plot top terms by topic
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic, sep = "")) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  scale_x_reordered()+
+  coord_flip()
+```
+
+```{r}
+## name topics
+# grab the top 5 terms in each topic
+topic_words <- terms(topics7, 5)
+
+# paste the topic words together as our topic names
+topic_names <- apply(topic_words, 2, paste, collapse = " ")
+```
+```{r}
+## plot distribution of topics over a sample of documents
+# sample of 5 documents
+example_ids <- c(1:5)
+n <- length(example_ids)
+
+# get topic proportions from example documents
+example_props <- theta7[example_ids,]
+colnames(example_props) <- topic_names
+
+# combine example topics with identifiers and melt to plottable form
+viz_df <- melt(cbind(data.frame(example_props),
+                     document = factor(1:n),
+                     variable.name = "topic",
+                     id.vars = "document")
+)
+
+# plot it
+ggplot(data = viz_df, aes(variable, value, fill = document), ylab = "proportion") +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  coord_flip() +
+  facet_wrap(~ document, ncol = n)
+```
+
+5.  Take a stab at interpreting the resulting topics. What are the key themes discussed in the articles in your data base?
+
+- I used the term "soil health" in my search. During the period that the resulting articles were pulled from, there were a few articles about some agricultural policy related to soil in India, which is where I believe the "soil.health.farmers.krishi.agriculture" topic comes from. There were also a number of general articles about soil health and agricultural practices, which some of the other topics might result from. There were also briefs by the USDA, which is where I believe the "soil.health.farmers.government.card" topic comes from. Honestly, the topics are nearly indistinguishable to me even from inspecting more than 5 of their top words. I believe 7 may have been too high of a k-value, and more distinct topics might have arisen from a smaller value of k. 
