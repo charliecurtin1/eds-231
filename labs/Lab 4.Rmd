@@ -29,6 +29,8 @@ library(textrecipes)
 library(ranger)
 ```
 
+## read in and prepare data for modeling 
+
 ```{r, message = FALSE}
 # load climbing accidents data
 urlfile ="https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/main/data/climbing_reports_model_dat.csv"
@@ -53,9 +55,6 @@ incidents_test <- testing(incidents_split)
 # create folds for k-folds cross-validation
 incidents_folds <- vfold_cv(incidents_train)
 
-```
-
-```{r}
 # specify a recipe to predict fatalities based on the text
 incidents_rec <- recipe(fatal ~ Text, data = incidents_train)
 
@@ -67,7 +66,12 @@ recipe <- incidents_rec %>%
   step_tokenfilter(Text, max_tokens = 1000) %>%
   # calculate the tf-idf
   step_tfidf(Text)
+```
 
+## random forest model- no tuning
+
+Running a random forest model to predict fatalities without tuning any hyperparameters
+```{r}
 # specify a random forest as our chosen model
 rf_spec <- rand_forest() %>%
   set_engine("ranger") %>%
@@ -89,7 +93,8 @@ rf_rs <- fit_resamples(
 rf_rs_metrics <- collect_metrics(rf_rs)
 rf_rs_predictions <- collect_predictions(rf_rs)
 
-rf_rs_metrics
+# print accuracy
+print(paste("accuracy of untuned random forest model:", round(rf_rs_metrics[1,3], 2)))
 
 # graph the roc auc curve for the random forest classification model
 rf_rs_predictions %>%
@@ -97,8 +102,50 @@ rf_rs_predictions %>%
   roc_curve(truth = fatal, .pred_fatal) %>%
   autoplot() +
   labs(title = "ROC curve for Climbing Incident Reports")
-
-# or a confusion matrix
-conf_mat_resampled(rf_rs, tidy = FALSE) %>%
-  autoplot(type = "heatmap")
 ```
+
+## random forest model- tuning
+
+Tuning the mtry() and trees() parameters for our random forest model
+```{r}
+# specify a random forest as our chosen model
+rf_tune <- rand_forest(trees = tune(),
+                       mtry = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+# bundle our model spec and recipe into a workflow
+rf_tune_wf <- workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(rf_tune)
+
+# set up a tune grid of possible values
+rf_grid <- grid_regular(
+  mtry(c(2, 8)), 
+  trees(c(500, 1000)),
+  levels = 5
+)
+
+# estimate performance with resampling and tuning
+rf_tune_rs <- tune_grid(
+  rf_tune_wf,
+  resamples = incidents_folds,
+  grid = rf_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+# collect performance metrics and predictions
+rf_rs_metrics <- collect_metrics(rf_rs)
+rf_rs_predictions <- collect_predictions(rf_rs)
+
+# print accuracy
+print(paste("accuracy of untuned random forest model:", round(rf_rs_metrics[1,3], 2)))
+
+# graph the roc auc curve for the random forest classification model
+rf_rs_predictions %>%
+  group_by(id) %>%
+  roc_curve(truth = fatal, .pred_fatal) %>%
+  autoplot() +
+  labs(title = "ROC curve for Climbing Incident Reports")
+```
+
