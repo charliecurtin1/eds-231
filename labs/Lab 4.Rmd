@@ -27,6 +27,7 @@ library(tidyverse)
 library(tidymodels)
 library(textrecipes)
 library(ranger)
+library(vip)
 ```
 
 ## read in and prepare data for modeling 
@@ -106,12 +107,12 @@ rf_rs_predictions %>%
 
 ## random forest model- tuning
 
-Tuning the mtry() and trees() parameters for our random forest model
+Tuning the trees() parameters for our random forest model
 ```{r}
 # specify a random forest as our chosen model
-rf_tune <- rand_forest(trees = tune(),
-                       mtry = tune()) %>%
-  set_engine("ranger") %>%
+rf_tune <- rand_forest(trees = tune()) %>%
+  set_engine("ranger",
+             importance = "impurity") %>%
   set_mode("classification")
 
 # bundle our model spec and recipe into a workflow
@@ -121,31 +122,71 @@ rf_tune_wf <- workflow() %>%
 
 # set up a tune grid of possible values
 rf_grid <- grid_regular(
-  mtry(c(2, 8)), 
   trees(c(500, 1000)),
   levels = 5
 )
 
 # estimate performance with resampling and tuning
-rf_tune_rs <- tune_grid(
-  rf_tune_wf,
-  resamples = incidents_folds,
-  grid = rf_grid,
-  control = control_grid(save_pred = TRUE)
-)
+run_time <- system.time({
+  rf_tune_rs <- tune_grid(
+    rf_tune_wf,
+    resamples = incidents_folds,
+    grid = rf_grid,
+    control = control_grid(save_pred = TRUE)
+  )
+})
 
-# collect performance metrics and predictions
-rf_rs_metrics <- collect_metrics(rf_rs)
-rf_rs_predictions <- collect_predictions(rf_rs)
+# select the best model based on accuracy
+best_rf <- select_best(rf_tune_rs, metric = "accuracy")
+rf_tune_rs_metrics <- show_best(rf_tune_rs, n = 3, metric = "accuracy")
 
-# print accuracy
-print(paste("accuracy of untuned random forest model:", round(rf_rs_metrics[1,3], 2)))
+# finalize workflow with the best random forest model
+final_rf_wf <- finalize_workflow(rf_tune_wf, best_rf)
 
-# graph the roc auc curve for the random forest classification model
-rf_rs_predictions %>%
-  group_by(id) %>%
-  roc_curve(truth = fatal, .pred_fatal) %>%
-  autoplot() +
-  labs(title = "ROC curve for Climbing Incident Reports")
+# fit the model to the training data
+final_rf_fit <- fit(final_rf_wf, data = incidents_train)
+
+# get predictions used the fitted model
+rf_tune_predictions <- predict(final_rf_fit, new_data = incidents_test) %>% 
+  bind_cols(incidents_test)
+
+# print accuracy of our model
+print(paste("accuracy of tuned random forest model:", round(rf_tune_rs_metrics[1,4], 2)))
 ```
+
+I tuned the random forest model to select the best number of trees to grow between 500 and 1000, and 1000 looks to be the best based on accuracy. However, this accuracy was only marginally better than the untuned model, with a value .87 as opposed to .86 in the untuned model.
+
+## variable importance
+
+```{r}
+# extract fit from the random forest
+rf_model <- extract_fit_parsnip(final_rf_fit)
+
+# create variable importance plot for predicting fatal
+vip(rf_model, num_features = 10) +
+  geom_col(fill = "seagreen") +
+  labs(title = "10 most important words for prediciting climbing accident outcomes",
+       x = "importance",
+       y = "features") +
+  theme_bw()
+```
+
+The variable importance plot shows the top 10 words most influential in predicting climbing accident outcomes accurately, whether they are fatal or non-fatal. Intuitively, some of the words seem to indicate that they would be important for predicting fatalities, like "died", "death", and "fatal". Others would indicate that they are important for predicting non-fatalities, like "found".
+
+## Compare prediction performance of the tuned model to the naive bayes and lasso models
+
+```{r}
+# use our fitted model to create predictions on the testing data and collect performance metrics
+rf_tune_metrics <- last_fit(final_rf_fit, incidents_split) %>% 
+  collect_metrics()
+
+# print accuracy and roc auc of predictions on the testing data
+print(paste("accuracy of tuned random forest model:", round(rf_tune_metrics[1,3], 2)))
+
+print(paste("ROC AUC of tuned random forest model:", round(rf_tune_metrics[2,3], 2)))
+```
+
+The lasso model we tuned in the lab demo gave an accuracy of around .92 and an ROC AUC of around .95. The models perform similarly, but the lasso model performs slightly better in terms of accuracy. I only tuned the trees parameter with the random forest model, which only slightly improved the performance as compared to the untuned model. I could've tuned other hyperparameters too like min_n or mtry with the random forest model to see if they improved performance even more, which might explain the difference in performance.
+
+
 
